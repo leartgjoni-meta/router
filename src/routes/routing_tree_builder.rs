@@ -13,16 +13,24 @@ impl RoutingTreeBuilder {
         Self { config }
     }
 
-    pub fn from_file(config: &std::path::PathBuf) -> Self {
-        let json = std::fs::read_to_string(config).unwrap();
-
-        RoutingTreeBuilder::new(json)
+    pub fn from_file(config: &std::path::PathBuf) -> Result<Self, ConfigurationError> {
+        let json = std::fs::read_to_string(config)
+            .map_err(|e| ConfigurationError(format!(
+                "Failed to read config file '{}': {}",
+                config.display(),
+                e
+            )))?;
+        Ok(RoutingTreeBuilder::new(json))
     }
 
     pub fn build_routing_tree(
         self,
     ) -> Result<Box<dyn RouteHandle + Send + Sync>, ConfigurationError> {
-        let json: Value = serde_json::from_str(&self.config).unwrap();
+        let json: Value = serde_json::from_str(&self.config)
+            .map_err(|e| ConfigurationError(format!(
+                "Invalid JSON config: {}",
+                e
+            )))?;
         let route: &Map<String, Value> = json.require("route")?;
 
         let root: Box<dyn RouteHandle + Send + Sync> = match route.require::<&str>("type")? {
@@ -43,7 +51,12 @@ impl RoutingTreeBuilder {
                     .collect::<Result<Vec<(&str, u16)>, ConfigurationError>>()?;
                 Box::new(RoundRobinRoute::new(servers))
             }
-            _ => unimplemented!(),
+            unsupported_type => {
+                return Err(ConfigurationError(format!(
+                    "Unsupported route type: {}",
+                    unsupported_type
+                )));
+            }
         };
 
         Ok(root)
